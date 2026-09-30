@@ -21,6 +21,31 @@ class ActionResult(BaseModel):
     entry: dict[str, Any] | None = None
 
 
+class VoidReceipt(BaseModel):
+    """批量作废的逐条回执：每一张巡查单单独给结论与失败原因。"""
+
+    id: Any
+    巡查单号: str = ""
+    ok: bool
+    voided: bool = False
+    reason: str = ""
+
+
+class BatchVoidPayload(BaseModel):
+    """批量作废入参：选中的巡查单 id 列表，可带批次号用于中断后续走。"""
+
+    ids: list[int] = Field(default_factory=list)
+    batch_no: str | None = None
+
+
+class BatchVoidResult(BaseModel):
+    batch_no: str
+    total: int
+    success_count: int
+    failed_count: int
+    receipts: list[VoidReceipt]
+
+
 class EntryPayload(BaseModel):
     """登记或修改一条业务记录时提交的字段集合。"""
 

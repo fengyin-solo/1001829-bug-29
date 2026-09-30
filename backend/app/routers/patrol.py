@@ -5,7 +5,13 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
-from app.schemas import ActionResult, EntryPayload, PageResult
+from app.schemas import (
+    ActionResult,
+    BatchVoidPayload,
+    BatchVoidResult,
+    EntryPayload,
+    PageResult,
+)
 from app.services.patrol import PatrolService
 
 router = APIRouter(prefix="/api/patrol", tags=["巡查任务"])
@@ -30,15 +36,6 @@ def list_entries(
     return PageResult(items=items, total=total, page=page, size=size)
 
 
-@router.get("/{entry_id}", response_model=dict)
-def get_entry(entry_id: int) -> dict:
-    """读取单条巡查单明细；不存在时给出可读的错误说明。"""
-    entry = service.get_entry(entry_id)
-    if entry is None:
-        raise HTTPException(status_code=404, detail=f"巡查单 {entry_id} 不存在或已归档")
-    return entry
-
-
 @router.post("", response_model=ActionResult)
 def create_entry(payload: EntryPayload) -> ActionResult:
     """登记一条巡查单，缺字段时说明原因而不是静默丢弃。"""
@@ -46,6 +43,46 @@ def create_entry(payload: EntryPayload) -> ActionResult:
     if missing:
         return ActionResult(ok=False, message=f"缺少必填字段：{'、'.join(missing)}")
     return ActionResult(ok=True, message="巡查单已登记", entry=entry)
+
+
+@router.post("/batch-void", response_model=BatchVoidResult)
+def batch_void(payload: BatchVoidPayload) -> BatchVoidResult:
+    """多选巡查单一键批量作废，逐条返回成功/失败与原因；整批不因一张失败而回滚。"""
+    result, error = service.void_many(payload.ids, batch_no=payload.batch_no)
+    if error:
+        raise HTTPException(status_code=400, detail=error)
+    return BatchVoidResult(**result)
+
+
+@router.get("/batch-void/{batch_no}", response_model=BatchVoidResult)
+def get_batch_void(batch_no: str) -> BatchVoidResult:
+    """按批次号取回批量作废回执：中断后凭批次号接着查，不重复落作废记录。"""
+    result = service.get_void_batch(batch_no)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"批次 {batch_no} 的作废回执不存在")
+    return BatchVoidResult(**result)
+
+
+@router.get("/export")
+def export_entries() -> dict[str, Any]:
+    """导出巡查任务清单：返回当前过滤条件下的全量数据，同时给出台账作废口径。"""
+    items, total = service.list_entries(page=1, size=10000)
+    voided_count = sum(1 for row in items if row.get("status") == "已作废")
+    return {
+        "module": "patrol",
+        "total": total,
+        "voided_count": voided_count,
+        "items": items,
+    }
+
+
+@router.get("/{entry_id}", response_model=dict)
+def get_entry(entry_id: int) -> dict:
+    """读取单条巡查单明细；不存在时给出可读的错误说明。"""
+    entry = service.get_entry(entry_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail=f"巡查单 {entry_id} 不存在或已归档")
+    return entry
 
 
 @router.post("/{entry_id}/actions", response_model=ActionResult)
@@ -56,10 +93,3 @@ def run_action(entry_id: int, payload: EntryPayload) -> ActionResult:
     if entry is None:
         return ActionResult(ok=False, message=message)
     return ActionResult(ok=True, message=message, entry=entry)
-
-
-@router.get("/export")
-def export_entries() -> dict[str, Any]:
-    """导出巡查任务清单：返回当前过滤条件下的全量数据。"""
-    items, total = service.list_entries(page=1, size=10000)
-    return {"module": "patrol", "total": total, "items": items}

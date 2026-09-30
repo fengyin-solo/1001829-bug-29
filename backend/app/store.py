@@ -14,6 +14,20 @@ class Store:
         self._tables: dict[str, list[dict[str, Any]]] = {
             name: [dict(row) for row in rows] for name, rows in SEED_ROWS.items()
         }
+        self._normalize_patrol()
+
+    def _normalize_patrol(self) -> None:
+        """巡查台账的 pending/abnormal/展示状态一律以 status 为准。
+
+        种子数据里可能出现 status=巡查中却 abnormal=True 的脏标记，会让概览「异常量」
+        与台账「已作废数」对不上；启动时统一纠正。
+        """
+        for row in self.rows("patrol"):
+            status = str(row.get("status") or "")
+            row["pending"] = status != "已作废"
+            row["abnormal"] = status == "已作废"
+            row["巡查状态"] = status
+            row.setdefault("void_logs", [])
 
     def module_names(self) -> list[str]:
         return sorted(self._tables)
@@ -31,11 +45,18 @@ class Store:
         modules: list[dict[str, object]] = []
         for name in self.module_names():
             rows = self.rows(name)
+            if name == "patrol":
+                # 巡查模块的异常量口径就是「已作废」数量，与巡查台账保持一致。
+                pending_count = sum(1 for row in rows if row.get("status") != "已作废")
+                abnormal_count = sum(1 for row in rows if row.get("status") == "已作废")
+            else:
+                pending_count = sum(1 for row in rows if row.get("pending"))
+                abnormal_count = sum(1 for row in rows if row.get("abnormal"))
             modules.append({
                 "name": name,
                 "created": len(rows),
-                "pending": sum(1 for row in rows if row.get("pending")),
-                "abnormal": sum(1 for row in rows if row.get("abnormal")),
+                "pending": pending_count,
+                "abnormal": abnormal_count,
             })
         cards = [
             {"label": "业务模块", "value": len(modules)},
