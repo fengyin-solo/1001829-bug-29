@@ -28,6 +28,36 @@ class EntryPayload(BaseModel):
     remark: str | None = None
 
 
+class BatchActionPayload(BaseModel):
+    """批量动作请求：一次提交多条记录 id。"""
+
+    ids: list[int] = Field(default_factory=list)
+    action: str | None = None
+
+
+class BatchItemResult(BaseModel):
+    """批量动作里单条记录的逐条回执：编号、是否成功与失败原因一并给出。"""
+
+    id: int | None = None
+    code: str = ""
+    ok: bool = False
+    status: str = ""
+    message: str = ""
+
+
+class BatchActionResult(BaseModel):
+    """批量动作结果：汇总口径与逐条回执同时返回，同一批可凭 batch_key 续跑。"""
+
+    ok: bool
+    message: str
+    action: str = ""
+    batch_key: str = ""
+    total: int = 0
+    success_count: int = 0
+    failed_count: int = 0
+    finished: bool = True
+    results: list[BatchItemResult] = Field(default_factory=list)
+
 
 class PipeEntry(BaseModel):
     """管段明细结构。"""

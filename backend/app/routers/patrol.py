@@ -5,8 +5,14 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
-from app.schemas import ActionResult, EntryPayload, PageResult
-from app.services.patrol import PatrolService
+from app.schemas import (
+    ActionResult,
+    BatchActionPayload,
+    BatchActionResult,
+    EntryPayload,
+    PageResult,
+)
+from app.services.patrol import VOID_ACTION, PatrolService
 
 router = APIRouter(prefix="/api/patrol", tags=["巡查任务"])
 
@@ -30,6 +36,19 @@ def list_entries(
     return PageResult(items=items, total=total, page=page, size=size)
 
 
+@router.get("/stats")
+def status_stats() -> dict[str, int]:
+    """巡查台账状态统计；已作废数与运营概览共用 store.count_by_status 口径。"""
+    return service.status_stats()
+
+
+@router.get("/export")
+def export_entries() -> dict[str, Any]:
+    """导出巡查任务清单：返回当前过滤条件下的全量数据。"""
+    items, total = service.list_entries(page=1, size=10000)
+    return {"module": "patrol", "total": total, "items": items}
+
+
 @router.get("/{entry_id}", response_model=dict)
 def get_entry(entry_id: int) -> dict:
     """读取单条巡查单明细；不存在时给出可读的错误说明。"""
@@ -48,18 +67,21 @@ def create_entry(payload: EntryPayload) -> ActionResult:
     return ActionResult(ok=True, message="巡查单已登记", entry=entry)
 
 
+@router.post("/batch-actions", response_model=BatchActionResult)
+def batch_action(payload: BatchActionPayload) -> BatchActionResult:
+    """多选一次提交批量作废：逐条给出巡查单号、成功与否与失败原因，可断点续跑。"""
+    action = str(payload.action or VOID_ACTION).strip()
+    if action != VOID_ACTION:
+        raise HTTPException(status_code=400, detail=f"批量动作「{action}」暂不支持，目前仅支持作废巡查")
+    summary = service.batch_void(payload.ids)
+    return BatchActionResult(**summary)
+
+
 @router.post("/{entry_id}/actions", response_model=ActionResult)
 def run_action(entry_id: int, payload: EntryPayload) -> ActionResult:
     """对单条巡查单执行派发巡查、提交结果、作废巡查；不允许的动作会被拦下并说明原因。"""
     action = str(payload.values.get("action") or "").strip()
-    entry, message = service.run_action(entry_id, action)
+    entry, message = service.run_action(entry_id, action, payload.values)
     if entry is None:
         return ActionResult(ok=False, message=message)
     return ActionResult(ok=True, message=message, entry=entry)
-
-
-@router.get("/export")
-def export_entries() -> dict[str, Any]:
-    """导出巡查任务清单：返回当前过滤条件下的全量数据。"""
-    items, total = service.list_entries(page=1, size=10000)
-    return {"module": "patrol", "total": total, "items": items}
